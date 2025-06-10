@@ -32,24 +32,21 @@ class Solicitud:
         return f"Solicitud(tipo_chasis={self.tipo_chasis}, color_chasis={self.color_chasis})"
 
 class Comunicaciones:
-    def __init__(self):
-        self.Robot1 = None
-        self.Robot2 = None
+    def __init__(self, broker_address: str, topic: str, username: str = None, password: str = None,lock = None):
+        self.broker_address = broker_address
+        self.broker_port = 1883
+        self.topic = topic
+        self.client = mqtt.Client()
+        if username and password:
+            self.client.username_pw_set(username, password)
+        self.Robot1 = Solicitud(0, CodigoColores.id_rojo)
+        self.Robot1.usado = True
+        self.Robot2 = Solicitud(0, CodigoColores.id_rojo)
+        self.Robot2.usado = True
         self.cambio = False
-        
-    # def __init__(self, broker_address: str, topic: str, username: str = None, password: str = None):
-    #     self.broker_address = broker_address
-    #     self.broker_port = 1883
-    #     self.topic = topic
-    #     self.client = mqtt.Client()
-    #     if username and password:
-    #         self.client.username_pw_set(username, password)
-    #     self.Robot1 = Solicitud(0, CodigoColores.id_rojo)
-    #     self.Robot1.usado = True
-    #     self.Robot2 = Solicitud(0, CodigoColores.id_rojo)
-    #     self.Robot2.usado = True
-    #     self.cambio = False
-    #     self.client.on_message = self.on_message
+        self.Emergency = False
+        self.client.on_message = self.on_message
+        self.lock = lock
     
     def conectar(self):
         try:
@@ -69,6 +66,12 @@ class Comunicaciones:
             id_device = data.get("id_device")
             if id_device == "1":                
                 return
+            topic = data.get("topic")
+            
+            if topic == "Emergency":
+                self.Emergency = data.get("Emergency_stop")
+                return
+            
             id_estacion = data.get("id_estacion")
             tipo_chasis = data.get("tipo_chasis")
             id_color_raw = data.get("id_color")
@@ -83,20 +86,25 @@ class Comunicaciones:
                 return
 
             solicitud = Solicitud(tipo_chasis=tipo_chasis, color_chasis=id_color)
-            if id_estacion == 1:
+            print(f"id de estacion: {id_estacion}")
+            
+            self.lock.acquire()
+            
+            if id_estacion == "1":
                 self.Robot1 = solicitud
-            elif id_estacion == 2:
+            elif id_estacion == "2":
                 self.Robot2 = solicitud
             else:
                 logging.warning("ID de estación desconocido: %s", id_estacion)  
-            logging.info("Solicitud recibida: %s para el robot: %d", solicitud, id_estacion)
+            logging.info("Solicitud recibida: %s para el robot: %s", solicitud, id_estacion)
             self.cambio = True
+            self.lock.release()
 
         except json.JSONDecodeError as e:
             logging.error("Error al decodificar el JSON: %s", e)
         except Exception as e:
             logging.error("Error al procesar el mensaje: %s", e)
-
+        
     def enviar_estado_robots(self,robot1: bool, robot2: bool):
         mensaje = {
             "id_device": "1",
@@ -107,4 +115,5 @@ class Comunicaciones:
             self.client.publish(self.topic, json.dumps(mensaje))
             #logging.info("Mensaje enviado al tema '%s': %s", self.topic, mensaje)
         except Exception as e:
+            print("Error al enviar el mensaje: %s", e)
             logging.error("Error al enviar el mensaje: %s", e)
